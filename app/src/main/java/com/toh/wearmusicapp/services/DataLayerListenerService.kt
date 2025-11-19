@@ -1,28 +1,30 @@
 package com.toh.wearmusicapp.services
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
-import androidx.compose.ui.input.key.type
 import com.blankj.utilcode.util.GsonUtils
 import com.blankj.utilcode.util.ToastUtils
+import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.MessageEvent
+import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
-import com.google.gson.reflect.TypeToken
 import com.toh.shared.WearableActionPath.PING_PHONE
 import com.toh.shared.WearableActionPath.SYNC_APP_SETTING
 import com.toh.shared.WearableActionPath.SYNC_LIST_AUDIO
+import com.toh.shared.WearableChannelPath
 import com.toh.shared.WearableDataParam
 import com.toh.shared.config.AppSetting
 import com.toh.shared.model.AudioItem
 import com.toh.shared.utils.LocaleManager
 import com.toh.wearmusicapp.WearApplicationModules
 import com.toh.wearmusicapp.eventbus.Event
-import com.toh.wearmusicapp.utils.WearableUtils
 import com.toh.wearmusicapp.eventbus.MessageEventBus
 import com.toh.wearmusicapp.utils.AudioDataCache
+import com.toh.wearmusicapp.utils.WearableUtils
 import com.utility.DataUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +32,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.greenrobot.eventbus.EventBus
+import java.io.File
+import java.net.URLDecoder
 
 class DataLayerListenerService : WearableListenerService() {
     companion object {
@@ -68,6 +72,45 @@ class DataLayerListenerService : WearableListenerService() {
         }
     }
 
+    override fun onChannelOpened(channel: ChannelClient.Channel) {
+        super.onChannelOpened(channel)
+        val path = URLDecoder.decode(channel.path, Charsets.UTF_8)
+        val fakeUri = Uri.parse("wear://${channel.path}")
+        val fileName = try {
+            URLDecoder.decode(fakeUri.getQueryParameter("name").toString(), Charsets.UTF_8)
+        } catch (_: Exception) {
+            "${System.currentTimeMillis()}.audio"
+        }
+        Log.d(TAG, "onChannelOpened: $path")
+        if (path.startsWith(WearableChannelPath.DOWNLOAD_FILE, ignoreCase = true)) {
+            Log.d(TAG, "Received file: $fileName")
+            receiveFileChannel(channel, fileName)
+        }
+    }
+
+    private fun receiveFileChannel(channel: ChannelClient.Channel, fileName: String) {
+        val destFile = File(cacheDir, fileName)
+        val destUri = Uri.fromFile(destFile)
+
+        Wearable.getChannelClient(this)
+            .receiveFile(channel, destUri, false)
+            .addOnCanceledListener {
+                Log.i(TAG, "receiveFileWithProgress: cancel")
+            }
+            .addOnSuccessListener {
+                Log.d(TAG, "Download finished")
+                ToastUtils.showShort("Receive file $fileName success.")
+                Wearable.getChannelClient(this).close(channel)
+            }.addOnFailureListener {
+                Log.i(TAG, "receiveFileWithProgress: " + it.message)
+                ToastUtils.showShort("Receive file $fileName failure. Reason: ${it.message}")
+            }
+    }
+
+    override fun onChannelClosed(channel: ChannelClient.Channel, p1: Int, p2: Int) {
+        super.onChannelClosed(channel, p1, p2)
+        Log.i(TAG, "onChannelClosed: ${channel.path}")
+    }
 
     private fun doOnSyncListAudio(dataEvent: DataEvent) {
         DataMapItem.fromDataItem(dataEvent.dataItem).dataMap.let { dataMap ->
@@ -116,7 +159,10 @@ class DataLayerListenerService : WearableListenerService() {
                         // Gửi sự kiện để cập nhật UI
                         EventBus.getDefault().post(MessageEventBus(Event.SYNC_LIST_AUDIO_SUCCESS))
                     } else {
-                        Log.e(TAG, "Failed to merge and save audio list due to missing or corrupt chunks.")
+                        Log.e(
+                            TAG,
+                            "Failed to merge and save audio list due to missing or corrupt chunks."
+                        )
                         // Xóa các file chunk còn lại nếu có lỗi
                         cleanupChunks(this@DataLayerListenerService, totalChunks)
                     }
@@ -181,7 +227,10 @@ class DataLayerListenerService : WearableListenerService() {
                 appSetting.language?.let { language ->
                     val oldLanguage = LocaleManager.getLanguage(this@DataLayerListenerService)
                     if (oldLanguage != language) {
-                        Log.e(TAG, "LANGUAGE_CHANGED: AppSettings language: $language, oldLanguage: $oldLanguage")
+                        Log.e(
+                            TAG,
+                            "LANGUAGE_CHANGED: AppSettings language: $language, oldLanguage: $oldLanguage"
+                        )
                         languageChanged = true
                         LocaleManager.setNewLocale(this@DataLayerListenerService, language)
                     }
@@ -214,7 +263,10 @@ class DataLayerListenerService : WearableListenerService() {
         ioScope.launch {
             val appSetting = appPref.getAppSettings()
             if (appSetting.isEmpty()) {
-                WearableUtils.sendCustomMessageToPhone(this@DataLayerListenerService, SYNC_APP_SETTING)
+                WearableUtils.sendCustomMessageToPhone(
+                    this@DataLayerListenerService,
+                    SYNC_APP_SETTING
+                )
             }
         }
     }

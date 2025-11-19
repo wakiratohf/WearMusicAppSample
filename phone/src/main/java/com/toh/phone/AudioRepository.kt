@@ -1,5 +1,6 @@
 package com.toh.phone
 
+import android.content.ContentUris
 import android.content.Context
 import android.provider.MediaStore
 import com.toh.shared.model.AudioItem
@@ -43,7 +44,8 @@ object AudioRepository {
                         title = it.getString(titleCol) ?: "",
                         fileName = it.getString(nameCol) ?: "",
                         duration = it.getLong(durationCol),
-                        size = it.getLong(sizeCol)
+                        size = it.getLong(sizeCol),
+                        uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, it.getLong(idCol)).toString()
                     )
                 )
             }

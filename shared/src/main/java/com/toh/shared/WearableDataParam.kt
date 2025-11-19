@@ -7,4 +7,5 @@ object WearableDataParam {
     const val LIST_AUDIO_DATA = "list_audio_data"
     const val CHUNK_INDEX = "chunk_index"
     const val CHUNK_TOTAL = "chunk_total"
+    const val AUDIO_DATA = "audio_data"
 }

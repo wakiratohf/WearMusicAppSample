@@ -2,8 +2,9 @@ package com.toh.phone.helper.wearable
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.net.Uri
 import android.os.Build
-import android.util.Log
+import android.provider.MediaStore
 import com.blankj.utilcode.util.GsonUtils
 import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.CapabilityInfo
@@ -31,14 +32,12 @@ import kotlinx.coroutines.tasks.await
 import org.greenrobot.eventbus.EventBus
 import java.util.Locale
 
-class WearableHelper(val context: Context) : DataClient.OnDataChangedListener, MessageClient.OnMessageReceivedListener, CapabilityClient.OnCapabilityChangedListener {
+class WearableHelper(val context: Context) : DataClient.OnDataChangedListener,
+    MessageClient.OnMessageReceivedListener, CapabilityClient.OnCapabilityChangedListener {
     private var dataClient: DataClient? = null
     private var messageClient: MessageClient? = null
     private val appPref by lazy { ApplicationModules.instant.getPreferencesHelper(context.applicationContext) }
     private val phoneMediaRequestHandler = PhoneMediaRequestHandler(context)
-
-    override fun onDataChanged(dataEvents: DataEventBuffer) {
-    }
 
     override fun onCapabilityChanged(capabilityInfo: CapabilityInfo) {
     }
@@ -96,21 +95,23 @@ class WearableHelper(val context: Context) : DataClient.OnDataChangedListener, M
     @SuppressLint("LogNotTimber")
     override fun onMessageReceived(messageEvent: MessageEvent) {
         DebugLog.logd("onMessageReceived: ${messageEvent.path}")
-        EventBus.getDefault().post(WearableMessageEvent(messageEvent.path, String(messageEvent.data)))
+        EventBus.getDefault()
+            .post(WearableMessageEvent(messageEvent.path, String(messageEvent.data)))
         if (messageEvent.path == WearableActionPath.SYNC_APP_SETTING) {
             doOnSyncAppSetting()
         } else if (messageEvent.path == WearableActionPath.PING_PHONE) {
             doOnPingPhone()
-        } else if( messageEvent.path == WearableActionPath.SYNC_LIST_AUDIO) {
+        } else if (messageEvent.path == WearableActionPath.SYNC_LIST_AUDIO) {
             onSyncListAudioToWear(context)
-        }else if (messageEvent.path == WearableActionPath.REQUEST_DOWNLOAD_FILE) {
-            onRequestDownloadFileFromWear(String(messageEvent.data))
         }
         phoneMediaRequestHandler.onMessageReceived(messageEvent)
     }
 
-    private fun onRequestDownloadFileFromWear(dataJson: String) {
-        Log.i("thoinv", "onRequestDownloadFileFromWear: " + dataJson)
+    override fun onDataChanged(dataEvents: DataEventBuffer) {
+        dataEvents.forEach { dataEvent ->
+            val uri = dataEvent.dataItem.uri
+            phoneMediaRequestHandler.onDataChanged(uri, dataEvent)
+        }
     }
 
     @OptIn(DelicateCoroutinesApi::class)
@@ -119,7 +120,6 @@ class WearableHelper(val context: Context) : DataClient.OnDataChangedListener, M
             val wearableHelper = ApplicationModules.instant.wearableHelper
             wearableHelper?.let {
                 val listAudio = AudioRepository.getAudioList(context)
-
                 val chunkedList = listAudio.chunked(100) // Split list into chunks of 100 item
                 chunkedList.forEachIndexed { index, chunk ->
                     val dataMap = DataMap().apply {
@@ -127,7 +127,11 @@ class WearableHelper(val context: Context) : DataClient.OnDataChangedListener, M
                         putInt(WearableDataParam.CHUNK_TOTAL, chunkedList.size)
                         putString(WearableDataParam.LIST_AUDIO_DATA, GsonUtils.toJson(chunk))
                     }
-                    wearableHelper.sendChangeEvent(WearableActionPath.SYNC_LIST_AUDIO, dataMap, true)
+                    wearableHelper.sendChangeEvent(
+                        WearableActionPath.SYNC_LIST_AUDIO,
+                        dataMap,
+                        true
+                    )
                     delay(500L) // Small delay to avoid overwhelming the data layer
                 }
             }
@@ -136,7 +140,10 @@ class WearableHelper(val context: Context) : DataClient.OnDataChangedListener, M
 
     fun doOnPingPhone() {
         sendChangeEvent(WearableActionPath.PING_PHONE, DataMap().apply {
-            putString(WearableDataParam.MESSAGE, Build.MODEL + " pong at " + System.currentTimeMillis())
+            putString(
+                WearableDataParam.MESSAGE,
+                Build.MODEL + " pong at " + System.currentTimeMillis()
+            )
         }, true)
     }
 
